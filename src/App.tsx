@@ -63,11 +63,21 @@ interface Escalation {
   branch: string;
   unit: string;
   status: 'Open' | 'In Progress' | 'Resolved' | 'Closed';
-  photo_url: string | null;
+  photo_urls: string[];
+  photo_url?: string | null; // For backward compatibility
   created_at: string;
   reporter_id: string;
   resolution?: string;
   resolved_at?: string;
+}
+
+interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning';
+  created_at: string;
+  read: boolean;
 }
 
 // --- Components ---
@@ -281,7 +291,21 @@ const Auth = ({ onAuthSuccess }: { onAuthSuccess: () => void }) => {
   );
 };
 
-const Sidebar = ({ activeTab, setActiveTab, onLogout, user }: { activeTab: string, setActiveTab: (t: string) => void, onLogout: () => void, user: Profile | null }) => {
+const Sidebar = ({ activeTab, setActiveTab, onLogout, user, notifications, setNotifications }: { 
+  activeTab: string, 
+  setActiveTab: (t: string) => void, 
+  onLogout: () => void, 
+  user: Profile | null,
+  notifications: Notification[],
+  setNotifications: React.Dispatch<React.SetStateAction<Notification[]>>
+}) => {
+  const [showNotifications, setShowNotifications] = useState(false);
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  const markAllAsRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'reports', label: 'Reports', icon: Filter },
@@ -306,6 +330,51 @@ const Sidebar = ({ activeTab, setActiveTab, onLogout, user }: { activeTab: strin
       </div>
 
       <nav className="flex-1 px-4 space-y-1 mt-4">
+        <div className="px-4 mb-2">
+          <button 
+            onClick={() => setShowNotifications(!showNotifications)}
+            className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-all relative group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <AlertCircle className="w-4 h-4 text-gray-500 group-hover:text-black" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+                )}
+              </div>
+              <span className="text-sm font-medium text-gray-500 group-hover:text-black">Alerts</span>
+            </div>
+            {unreadCount > 0 && (
+              <span className="bg-red-50 text-red-600 text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                {unreadCount}
+              </span>
+            )}
+          </button>
+
+          {showNotifications && (
+            <div className="mt-2 space-y-2 max-h-60 overflow-y-auto p-2 bg-gray-50 rounded-2xl border border-black/5 animate-in slide-in-from-top-2 duration-200">
+              <div className="flex items-center justify-between mb-2 px-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Recent Alerts</span>
+                <button onClick={markAllAsRead} className="text-[10px] text-blue-600 font-bold hover:underline">Mark all read</button>
+              </div>
+              {notifications.length === 0 ? (
+                <p className="text-[10px] text-gray-400 text-center py-4 italic">No new alerts</p>
+              ) : (
+                notifications.map(n => (
+                  <div key={n.id} className={cn(
+                    "p-3 rounded-xl border transition-all",
+                    n.read ? "bg-white/50 border-transparent" : "bg-white border-blue-100 shadow-sm"
+                  )}>
+                    <p className="text-[10px] font-bold text-gray-900">{n.title}</p>
+                    <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
+                    <p className="text-[8px] text-gray-400 mt-1">{format(new Date(n.created_at), 'HH:mm')}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
         {menuItems.map((item) => (
           <button
             key={item.id}
@@ -356,11 +425,15 @@ const Sidebar = ({ activeTab, setActiveTab, onLogout, user }: { activeTab: strin
 const DetailModal = ({ 
   isOpen, 
   onClose, 
-  escalation 
+  escalation,
+  setSelectedPhotoUrl,
+  setIsPhotoModalOpen
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
-  escalation: Escalation | null
+  escalation: Escalation | null,
+  setSelectedPhotoUrl: (url: string) => void,
+  setIsPhotoModalOpen: (isOpen: boolean) => void
 }) => {
   if (!isOpen || !escalation) return null;
 
@@ -396,8 +469,16 @@ const DetailModal = ({
             </div>
             <div className="space-y-1">
               <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Location</p>
-              <p className="text-sm font-bold text-gray-900">{escalation.unit}</p>
-              <p className="text-xs text-gray-500">{escalation.branch}</p>
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase">Branch:</span>
+                  <p className="text-sm font-bold text-gray-900">{escalation.branch}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase">Unit:</span>
+                  <p className="text-xs font-medium text-gray-600">{escalation.unit}</p>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -406,15 +487,41 @@ const DetailModal = ({
             <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{escalation.description}</p>
           </div>
 
-          {escalation.photo_url && (
-            <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Defect Photo</p>
-              <img 
-                src={escalation.photo_url} 
-                alt="Defect" 
-                className="w-full rounded-2xl border border-black/5 shadow-sm"
-                referrerPolicy="no-referrer"
-              />
+          {( (escalation.photo_urls && escalation.photo_urls.length > 0) || escalation.photo_url ) && (
+            <div className="space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                Defect Photos {escalation.photo_urls?.length ? `(${escalation.photo_urls.length})` : ''}
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                {escalation.photo_urls && escalation.photo_urls.length > 0 ? (
+                  escalation.photo_urls.map((url, idx) => (
+                    <img 
+                      key={idx}
+                      src={url} 
+                      alt={`Defect ${idx + 1}`} 
+                      className="w-full h-48 object-cover rounded-2xl border border-black/5 shadow-sm hover:scale-[1.02] transition-transform cursor-pointer"
+                      referrerPolicy="no-referrer"
+                      onClick={() => {
+                        setSelectedPhotoUrl(url);
+                        setIsPhotoModalOpen(true);
+                      }}
+                    />
+                  ))
+                ) : (
+                  escalation.photo_url && (
+                    <img 
+                      src={escalation.photo_url} 
+                      alt="Defect" 
+                      className="w-full h-48 object-cover rounded-2xl border border-black/5 shadow-sm hover:scale-[1.02] transition-transform cursor-pointer"
+                      referrerPolicy="no-referrer"
+                      onClick={() => {
+                        setSelectedPhotoUrl(escalation.photo_url!);
+                        setIsPhotoModalOpen(true);
+                      }}
+                    />
+                  )
+                )}
+              </div>
             </div>
           )}
 
@@ -602,13 +709,25 @@ const ResolutionModal = ({
   );
 };
 
-const NewEscalationModal = ({ isOpen, onClose, user, onSuccess }: { isOpen: boolean, onClose: () => void, user: Profile | null, onSuccess: () => void }) => {
+const NewEscalationModal = ({ 
+  isOpen, 
+  onClose, 
+  user, 
+  onSuccess,
+  addNotification
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  user: Profile | null, 
+  onSuccess: () => void,
+  addNotification: (title: string, message: string, type?: 'info' | 'success' | 'warning') => void
+}) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [unit, setUnit] = useState('');
-  const [photo, setPhoto] = useState<File | null>(null);
+  const [photos, setPhotos] = useState<File[]>([]);
 
   const units = [
     "CURCULAR KNITTING UNIT",
@@ -636,30 +755,29 @@ const NewEscalationModal = ({ isOpen, onClose, user, onSuccess }: { isOpen: bool
     setError(null);
 
     try {
-      let photoUrl = null;
-      if (photo) {
-        const fileExt = photo.name.split('.').pop();
-        const fileName = `${Math.random()}.${fileExt}`;
-        
-        // Try uploading - ensure bucket 'escalation-photos' exists in Supabase
-        const { error: uploadError, data } = await supabase.storage
-          .from('escalation-photos')
-          .upload(fileName, photo, {
-            cacheControl: '3600',
-            upsert: false
-          });
-        
-        if (uploadError) {
-          console.error('Upload Error:', uploadError);
-          if (uploadError.message.includes('bucket not found') || uploadError.message.includes('Bucket not found')) {
-            throw new Error("Photo upload failed: Storage bucket 'escalation-photos' not found. Please create it in your Supabase dashboard or SQL editor.");
+      const photoUrls: string[] = [];
+      
+      if (photos.length > 0) {
+        for (const photo of photos) {
+          const fileExt = photo.name.split('.').pop();
+          const fileName = `${Math.random()}.${fileExt}`;
+          
+          const { error: uploadError, data } = await supabase.storage
+            .from('escalation-photos')
+            .upload(fileName, photo, {
+              cacheControl: '3600',
+              upsert: false
+            });
+          
+          if (uploadError) {
+            console.error('Upload Error:', uploadError);
+            throw new Error(`Photo upload failed: ${uploadError.message}`);
           }
-          throw new Error(`Photo upload failed: ${uploadError.message}`);
-        }
 
-        if (data) {
-          const { data: { publicUrl } } = supabase.storage.from('escalation-photos').getPublicUrl(fileName);
-          photoUrl = publicUrl;
+          if (data) {
+            const { data: { publicUrl } } = supabase.storage.from('escalation-photos').getPublicUrl(fileName);
+            photoUrls.push(publicUrl);
+          }
         }
       }
 
@@ -706,11 +824,14 @@ const NewEscalationModal = ({ isOpen, onClose, user, onSuccess }: { isOpen: bool
         throw new Error("Critical Sync Error: Profile was 'successfully' synced but cannot be retrieved. This usually means RLS is enabled but you lack a 'SELECT' policy.");
       }
 
-      // 2. Verify if 'unit' column exists in 'escalations'
-      const { error: schemaCheckError } = await supabase.from('escalations').select('unit').limit(1);
+      // 2. Verify if 'unit' and 'photo_urls' columns exist in 'escalations'
+      const { error: schemaCheckError } = await supabase.from('escalations').select('unit, photo_urls').limit(1);
       if (schemaCheckError) {
         if (schemaCheckError.message.includes('column "unit" does not exist')) {
           throw new Error("Database Schema Error: The 'unit' column is missing from the 'escalations' table. Please add it using: ALTER TABLE escalations ADD COLUMN unit text;");
+        }
+        if (schemaCheckError.message.includes('column "photo_urls" does not exist')) {
+          throw new Error("Database Schema Error: The 'photo_urls' column is missing from the 'escalations' table. Please add it using: ALTER TABLE escalations ADD COLUMN photo_urls text[];");
         }
         if (schemaCheckError.message.includes('relation "public.escalations" does not exist')) {
           throw new Error("Database Error: The 'escalations' table is missing. Please run the table creation SQL in your Supabase SQL Editor.");
@@ -729,7 +850,7 @@ const NewEscalationModal = ({ isOpen, onClose, user, onSuccess }: { isOpen: bool
           branch: user.branch || 'Not Specified',
           unit: unit,
           status: 'Open',
-          photo_url: photoUrl,
+          photo_urls: photoUrls,
           reporter_id: user.id
         });
 
@@ -742,11 +863,12 @@ const NewEscalationModal = ({ isOpen, onClose, user, onSuccess }: { isOpen: bool
       }
       
       await onSuccess();
+      addNotification('Escalation Reported', `Case ${caseId} has been successfully submitted.`, 'success');
       onClose();
       setTitle('');
       setDescription('');
       setUnit('');
-      setPhoto(null);
+      setPhotos([]);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -846,22 +968,35 @@ const NewEscalationModal = ({ isOpen, onClose, user, onSuccess }: { isOpen: bool
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-gray-400">Upload Photo of Defect</label>
-            <div className="relative group">
-              <input
-                type="file"
-                accept="image/*"
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                onChange={(e) => setPhoto(e.target.files?.[0] || null)}
-              />
-              <div className="border-2 border-dashed border-gray-200 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 group-hover:border-black/20 transition-colors">
-                <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center">
-                  <Camera className="w-6 h-6 text-gray-400" />
+            <label className="text-xs font-bold uppercase tracking-wider text-gray-400">Defect Photos (Multiple allowed)</label>
+            <div className="flex flex-wrap gap-3 mb-2">
+              {photos.map((p, i) => (
+                <div key={i} className="relative w-20 h-20 rounded-2xl overflow-hidden border border-black/5 shadow-sm group/thumb">
+                  <img src={URL.createObjectURL(p)} className="w-full h-full object-cover" alt="Preview" />
+                  <button 
+                    type="button"
+                    onClick={() => setPhotos(prev => prev.filter((_, idx) => idx !== i))}
+                    className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1 opacity-0 group-hover/thumb:opacity-100 hover:bg-black transition-opacity"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
                 </div>
-                <p className="text-sm text-gray-500">
-                  {photo ? photo.name : 'Capture / Upload'}
-                </p>
-              </div>
+              ))}
+              <label className="w-20 h-20 rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 transition-all hover:border-black/20">
+                <Camera className="w-6 h-6 text-gray-300" />
+                <span className="text-[8px] text-gray-400 font-bold uppercase mt-1">Add</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files) {
+                      setPhotos(prev => [...prev, ...Array.from(e.target.files!)]);
+                    }
+                  }}
+                />
+              </label>
             </div>
           </div>
 
@@ -910,10 +1045,17 @@ const ReportsView = ({ escalations }: { escalations: Escalation[] }) => {
     }, {} as Record<string, number>)
   ).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
 
+  const reporterData = Object.entries(
+    escalations.reduce((acc, e) => {
+      acc[e.reporter_name] = (acc[e.reporter_name] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>)
+  ).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
+
   const COLORS = ['#F97316', '#10B981'];
 
   const downloadCSV = () => {
-    const headers = ['Case ID', 'Title', 'Description', 'Status', 'Reporter', 'Branch', 'Unit', 'Created At', 'Photo URL', 'Resolution', 'Resolved At'];
+    const headers = ['Case ID', 'Title', 'Description', 'Status', 'Reporter', 'Branch', 'Unit', 'Created At', 'Photo URLs', 'Resolution', 'Resolved At'];
     const rows = escalations.map(e => [
       e.case_id,
       e.title,
@@ -923,7 +1065,7 @@ const ReportsView = ({ escalations }: { escalations: Escalation[] }) => {
       e.branch,
       e.unit,
       format(new Date(e.created_at), 'yyyy-MM-dd HH:mm'),
-      e.photo_url || '',
+      (e.photo_urls || []).join('; '),
       e.resolution || '',
       e.resolved_at ? format(new Date(e.resolved_at), 'yyyy-MM-dd HH:mm') : ''
     ]);
@@ -1024,8 +1166,14 @@ const ReportsView = ({ escalations }: { escalations: Escalation[] }) => {
           </div>
         </div>
 
-        <div className="bg-white p-8 rounded-[32px] border border-black/5 shadow-sm lg:col-span-2">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-8">Escalations by Branch</h3>
+        <div className="bg-white p-8 rounded-[32px] border border-black/5 shadow-sm">
+          <div className="flex items-center justify-between mb-8">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Escalations by Branch</h3>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500" />
+              <span className="text-[10px] font-bold text-gray-400 uppercase">Total Count</span>
+            </div>
+          </div>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={branchData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
@@ -1049,6 +1197,42 @@ const ReportsView = ({ escalations }: { escalations: Escalation[] }) => {
                   contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
                 />
                 <Bar dataKey="count" fill="#3B82F6" radius={[8, 8, 0, 0]} barSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white p-8 rounded-[32px] border border-black/5 shadow-sm">
+          <div className="flex items-center justify-between mb-8">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Reporter Wise Issues</h3>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-purple-500" />
+              <span className="text-[10px] font-bold text-gray-400 uppercase">Issue Count</span>
+            </div>
+          </div>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={reporterData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                <XAxis 
+                  dataKey="name" 
+                  tick={{ fontSize: 10, fontWeight: 700, fill: '#9ca3af' }}
+                  axisLine={false}
+                  tickLine={false}
+                  angle={-45}
+                  textAnchor="end"
+                  interval={0}
+                />
+                <YAxis 
+                  tick={{ fontSize: 10, fontWeight: 700, fill: '#9ca3af' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip 
+                  cursor={{ fill: '#f9fafb' }}
+                  contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                />
+                <Bar dataKey="count" fill="#8B5CF6" radius={[8, 8, 0, 0]} barSize={40} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1159,17 +1343,17 @@ const SettingsView = ({ user }: { user: Profile | null }) => {
       <div className="bg-white p-8 rounded-[32px] border border-black/5 shadow-sm space-y-6">
         <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400">Notifications</h3>
         <div className="space-y-4">
-          <label className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl cursor-pointer">
+          <label className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
             <div>
               <p className="text-sm font-bold">Email Notifications</p>
-              <p className="text-xs text-gray-500">Receive alerts when a new escalation is reported.</p>
+              <p className="text-xs text-gray-500">Requires Resend/SendGrid integration (Prototype only).</p>
             </div>
-            <input type="checkbox" defaultChecked className="w-5 h-5 rounded border-gray-300 text-black focus:ring-black" />
+            <div className="px-3 py-1 bg-gray-200 rounded-lg text-[10px] font-bold text-gray-500 uppercase tracking-wider">Not Configured</div>
           </label>
           <label className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl cursor-pointer">
             <div>
-              <p className="text-sm font-bold">System Alerts</p>
-              <p className="text-xs text-gray-500">Critical updates about the escalation center.</p>
+              <p className="text-sm font-bold">System Alerts (In-App)</p>
+              <p className="text-xs text-gray-500">Receive alerts inside the app for new reports.</p>
             </div>
             <input type="checkbox" defaultChecked className="w-5 h-5 rounded border-gray-300 text-black focus:ring-black" />
           </label>
@@ -1194,6 +1378,19 @@ export default function App() {
   const [escalations, setEscalations] = useState<Escalation[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  const addNotification = (title: string, message: string, type: 'info' | 'success' | 'warning' = 'info') => {
+    const newNotif: Notification = {
+      id: Math.random().toString(36).substr(2, 9),
+      title,
+      message,
+      type,
+      created_at: new Date().toISOString(),
+      read: false
+    };
+    setNotifications(prev => [newNotif, ...prev].slice(0, 20));
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1209,6 +1406,7 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
 
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
@@ -1278,6 +1476,31 @@ export default function App() {
     if (userProfile) fetchEscalations();
   }, [userProfile]);
 
+  useEffect(() => {
+    if (!userProfile) return;
+
+    // Real-time notifications for new escalations
+    const escalationSubscription = supabase
+      .channel('public:escalations')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'escalations' }, payload => {
+        const newEscalation = payload.new as Escalation;
+        // Only notify relevant users (Unit Head of that unit or Master)
+        if (userProfile.role === 'Master' || (userProfile.role === 'Unit Head' && userProfile.unit.includes(newEscalation.unit))) {
+          addNotification(
+            'New Escalation Reported', 
+            `${newEscalation.reporter_name} reported an issue in ${newEscalation.unit}.`,
+            'info'
+          );
+          fetchEscalations(true); // Refresh list silently
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(escalationSubscription);
+    };
+  }, [userProfile, fetchEscalations, addNotification]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
   };
@@ -1305,6 +1528,8 @@ export default function App() {
         setActiveTab={setActiveTab} 
         onLogout={handleLogout} 
         user={userProfile}
+        notifications={notifications}
+        setNotifications={setNotifications}
       />
 
       <main className="flex-1 overflow-y-auto">
@@ -1451,17 +1676,17 @@ export default function App() {
                               <span className="text-xs text-gray-500">{format(new Date(item.created_at), 'MMM d, yyyy')}</span>
                             </td>
                             <td className="px-6 py-5">
-                              {item.photo_url ? (
+                              {(item.photo_urls && item.photo_urls.length > 0) || item.photo_url ? (
                                 <button 
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setSelectedPhotoUrl(item.photo_url!);
+                                    setSelectedPhotoUrl(item.photo_urls?.[0] || item.photo_url!);
                                     setIsPhotoModalOpen(true);
                                   }}
-                                  className="group/photo relative w-12 h-12 rounded-lg overflow-hidden border border-black/5 hover:border-black/20 transition-all"
+                                  className="group/photo relative w-12 h-12 rounded-xl overflow-hidden border border-black/5 hover:border-black/20 transition-all shadow-sm"
                                 >
                                   <img 
-                                    src={item.photo_url} 
+                                    src={item.photo_urls?.[0] || item.photo_url!} 
                                     alt="Defect" 
                                     className="w-full h-full object-cover group-hover/photo:scale-110 transition-transform"
                                     referrerPolicy="no-referrer"
@@ -1469,9 +1694,14 @@ export default function App() {
                                   <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/photo:opacity-100 flex items-center justify-center transition-opacity">
                                     <Search className="w-3 h-3 text-white" />
                                   </div>
+                                  {item.photo_urls && item.photo_urls.length > 1 && (
+                                    <div className="absolute bottom-0 right-0 bg-black/70 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-tl-lg">
+                                      +{item.photo_urls.length - 1}
+                                    </div>
+                                  )}
                                 </button>
                               ) : (
-                                <div className="w-12 h-12 rounded-lg bg-gray-50 border border-dashed border-gray-200 flex items-center justify-center">
+                                <div className="w-12 h-12 rounded-xl bg-gray-50 border border-dashed border-gray-200 flex items-center justify-center">
                                   <Camera className="w-4 h-4 text-gray-300" />
                                 </div>
                               )}
@@ -1539,6 +1769,7 @@ export default function App() {
         onClose={() => setIsModalOpen(false)} 
         user={userProfile}
         onSuccess={fetchEscalations}
+        addNotification={addNotification}
       />
 
       <ResolutionModal
@@ -1559,6 +1790,8 @@ export default function App() {
         isOpen={isDetailModalOpen}
         onClose={() => setIsDetailModalOpen(false)}
         escalation={selectedEscalation}
+        setSelectedPhotoUrl={setSelectedPhotoUrl}
+        setIsPhotoModalOpen={setIsPhotoModalOpen}
       />
     </div>
   );
