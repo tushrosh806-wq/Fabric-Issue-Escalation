@@ -96,7 +96,7 @@ const Auth = ({ onAuthSuccess }: { onAuthSuccess: () => void }) => {
   const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
   const [role, setRole] = useState<Role>('Sales Person');
 
-  const branches = ["Mumbai", "Delhi", "Surat", "Ahmedabad", "Kolkata", "Jaipur", "Ulhasnagar", "Ludhiana", "Bangalore", "Tirupur"];
+  const branches = ["Mumbai", "Delhi", "Surat", "Ahmedabad", "Kolkata", "Jaipur", "Ulhasnagar", "Ludhiana", "Bangalore", "Tirupur", "Udhna"];
   const units = [
     "CURCULAR KNITTING UNIT",
     "CROCHET",
@@ -862,6 +862,109 @@ const NewEscalationModal = ({
         throw new Error(`Submission failed: ${insertError.message}`);
       }
       
+      // Send Professional Email Notifications BEFORE closing
+      try {
+        // Fetch Unit Heads, Branch Heads, and Masters
+        const { data: recipients, error: fetchError } = await supabase
+          .from('profiles')
+          .select('email, role, unit, branch')
+          .or(`role.eq.Master,role.eq.Unit Head,role.eq.Branch Head`);
+
+        if (fetchError) {
+          console.error('Error fetching email recipients:', fetchError);
+        } else {
+          const toEmails = ['rohit.sethia@ginzalimited.com'];
+          const ccEmails: string[] = [];
+
+          recipients?.forEach(r => {
+            if (r.role === 'Master') {
+              toEmails.push(r.email);
+            } else if (r.role === 'Unit Head') {
+              const assignedUnits = r.unit?.split(',').map(u => u.trim()) || [];
+              if (assignedUnits.includes(unit)) {
+                toEmails.push(r.email);
+              }
+            } else if (r.role === 'Branch Head') {
+              // CC the Branch Head of the reporter's branch
+              if (r.branch === user?.branch) {
+                ccEmails.push(r.email);
+              }
+            }
+          });
+
+          // Remove duplicates
+          const uniqueTo = Array.from(new Set(toEmails));
+          const uniqueCc = Array.from(new Set(ccEmails));
+
+          if (uniqueTo.length > 0) {
+            const emailResponse = await fetch('/api/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                to: uniqueTo,
+                cc: uniqueCc,
+                subject: `[URGENT] New Quality Escalation: ${caseId} - ${title}`,
+                html: `
+                  <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 12px; overflow: hidden;">
+                    <div style="background: #000; color: #fff; padding: 24px; text-align: center;">
+                      <h1 style="margin: 0; font-size: 20px;">New Quality Escalation Raised</h1>
+                    </div>
+                    <div style="padding: 32px; color: #333;">
+                      <p style="font-size: 16px; font-weight: bold; margin-bottom: 16px;">A new quality issue has been reported for your unit: ${unit}.</p>
+                      
+                      <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin-bottom: 24px;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                          <tr>
+                            <td style="padding: 8px 0; font-size: 12px; color: #999; text-transform: uppercase; width: 120px;">Case ID</td>
+                            <td style="padding: 8px 0; font-size: 14px; font-weight: bold;">${caseId}</td>
+                          </tr>
+                          <tr>
+                            <td style="padding: 8px 0; font-size: 12px; color: #999; text-transform: uppercase;">Title</td>
+                            <td style="padding: 8px 0; font-size: 14px; font-weight: bold;">${title}</td>
+                          </tr>
+                          <tr>
+                            <td style="padding: 8px 0; font-size: 12px; color: #999; text-transform: uppercase;">Reporter</td>
+                            <td style="padding: 8px 0; font-size: 14px;">${user.first_name} ${user.last_name} (${user.email})</td>
+                          </tr>
+                        </table>
+                      </div>
+
+                      <div style="margin-bottom: 24px;">
+                        <p style="font-size: 12px; color: #999; text-transform: uppercase; margin-bottom: 8px;">Description</p>
+                        <p style="font-size: 14px; line-height: 1.6; color: #444; background: #fff; padding: 15px; border: 1px solid #eee; border-radius: 8px;">${description}</p>
+                      </div>
+
+                      <p style="font-size: 13px; color: #666; margin-bottom: 20px;">
+                        <strong>Note:</strong> You can reply directly to this email to contact the reporter.<br/>
+                        Please check the Escalation Center dashboard for more details.
+                      </p>
+
+                      <div style="text-align: center;">
+                        <a href="https://fabric-issue-escalation.vercel.app/" style="display: inline-block; background: #000; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: bold; font-size: 14px;">View Dashboard</a>
+                      </div>
+                    </div>
+                    <div style="background: #f4f4f4; padding: 16px; text-align: center; border-top: 1px solid #eee;">
+                      <p style="margin: 0; font-size: 10px; color: #999;">Ginza Industries Ltd. Quality Escalation Center</p>
+                    </div>
+                  </div>
+                `
+              })
+            });
+            
+            const emailResult = await emailResponse.json();
+            if (!emailResponse.ok) {
+              console.error('Email API Error:', emailResult);
+            } else {
+              console.log('Email notification sent successfully:', emailResult);
+            }
+          } else {
+            console.log('No eligible Unit Heads or Masters found for this unit.');
+          }
+        }
+      } catch (emailErr) {
+        console.error('Failed to send email notification:', emailErr);
+      }
+
       await onSuccess();
       addNotification('Escalation Reported', `Case ${caseId} has been successfully submitted.`, 'success');
       onClose();
