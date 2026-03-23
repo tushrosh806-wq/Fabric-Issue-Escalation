@@ -896,6 +896,8 @@ const NewEscalationModal = ({
           const uniqueTo = Array.from(new Set(toEmails));
           const uniqueCc = Array.from(new Set(ccEmails));
 
+          console.log('Final Email Recipients:', { to: uniqueTo, cc: uniqueCc });
+
           if (uniqueTo.length > 0) {
             const emailResponse = await fetch('/api/send-email', {
               method: 'POST',

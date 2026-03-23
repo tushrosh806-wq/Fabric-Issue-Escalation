@@ -31,22 +31,27 @@ async function startServer() {
   app.post('/api/send-email', async (req, res) => {
     const { to, cc, subject, html } = req.body;
 
-    // Check if SMTP credentials are provided (either in env or defaults)
-    const smtpUser = process.env.SMTP_USER || 'ginza.quality.support@gmail.com';
-    const smtpPass = process.env.SMTP_PASS || 'dlwr uypp sbkr enwt';
+    // Check if SMTP credentials are provided (handle potential typo SMPT)
+    const smtpUser = process.env.SMTP_USER || process.env.SMPT_USER || 'ginza.quality.support@gmail.com';
+    const smtpPass = process.env.SMTP_PASS || process.env.SMPT_PASS || 'dlwr uypp sbkr enwt';
+
+    console.log(`Attempting to send email to: ${to}, cc: ${cc}`);
 
     if (!smtpUser || !smtpPass) {
       console.warn('SMTP credentials are not set. Email simulation mode.');
-      console.log('--- EMAIL SIMULATION ---');
-      console.log('To:', to);
-      console.log('CC:', cc);
-      console.log('Subject:', subject);
-      console.log('Content:', html);
-      console.log('------------------------');
       return res.json({ success: true, message: 'Email simulation successful' });
     }
 
     try {
+      // Re-create transporter to ensure fresh credentials from env
+      const currentTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
       const mailOptions = {
         from: `"Ginza Quality Support" <${smtpUser}>`,
         to: Array.isArray(to) ? to.join(', ') : to,
@@ -55,13 +60,13 @@ async function startServer() {
         html,
       };
 
-      const info = await transporter.sendMail(mailOptions);
+      const info = await currentTransporter.sendMail(mailOptions);
 
-      console.log('Email sent:', info.messageId);
+      console.log('Email sent successfully:', info.messageId);
       res.json({ success: true, messageId: info.messageId });
     } catch (err: any) {
-      console.error('Email sending failed:', err);
-      res.status(500).json({ error: err.message });
+      console.error('Email sending failed error details:', err);
+      res.status(500).json({ error: err.message, details: err.toString() });
     }
   });
 
